@@ -1,60 +1,94 @@
-#include <Arduino.h>
+
+//-- SAMPLE TIME IN MS --//
+#define SAMPLE_TIME_MS 20
+
+//Define pins of the alternative i2c bus //
+#define SDA1 21
+#define SCL1 4
+#define NUMBER_SENSORS 2
+
 #include <Wire.h>
-#include <VCNL3040.h>
+#include "VCNL3040.h"
 
-#define HostCom Serial
-#define HostCom_BaudRate 115200
-#define UPDATING_INTERVAL_MS 2000
+typedef struct {
+  byte header;
+  byte counter;
+  unsigned short int sensor_data[NUMBER_SENSORS];
+  byte tail;
+}msg_t;
 
-VCNL3040 optSensor1, optSensor2;
+msg_t serial_msg;
+VCNL3040 sensor1, sensor2;
 
 void setup() {
+  
+  Serial.begin(115200);
 
-  HostCom.begin(HostCom_BaudRate);
-  while(!HostCom);
-  HostCom.println("-- Hello Optical Sensors --");
+  // Init the I2C bus - Sensor 1 //
+  Wire.begin();       // Join default i2c bus
 
-  // Sensor 1 //
-  Wire.begin();
-  optSensor1.begin(Wire);
-
-  // Sensor 2 //
-  Wire1.setSDA(38);
-  Wire1.setSCL(37);
+  // Init the I2C bus - Sensor 2 //
+  Wire1.setSDA(38);   // SDA1
+  Wire1.setSCL(37);   // SCL1
   Wire1.begin();
-  optSensor2.begin(Wire1);
 
+  if (sensor1.begin() == false){
+    Serial.println("** Sensor1 not found. Please check wiring.");
+    //while (1); //Freeze!
+  }
+  
+  if (sensor2.begin(Wire1) == false){
+    Serial.println("** Sensor2 not found. Please check wiring.");
+    //while (1); //Freeze!
+  }
+
+  serial_msg.header = 10;
+  serial_msg.tail = 10;
+
+  sensor1.writeCommand(0x03, 0x080E); // Duty: 0; It: 8T; Bits = 16 Bits
+  sensor2.writeCommand(0x03, 0x080E); // Duty: 0; It: 8T; Bits = 16 Bits
+  
 }
 
-void loop() {
-  static unsigned long updating_interval = millis();
-  unsigned long mtime = millis();
-  static uint8_t counter=0;
+void loop()
+{
+  //Get proximity value. The value ranges from 0 to 65535 //
+  unsigned short int proxValue[NUMBER_SENSORS];
+  static unsigned long ttime = millis();
+  static uint16_t counter=0;
+  String dat="";
 
-  if(mtime >= updating_interval){
+  if( (ttime+SAMPLE_TIME_MS) <= millis() ){
+
+    if( sensor1.isConnected() ){
+      proxValue[0] = sensor1.getProximity();
+    }else{
+      proxValue[0] = 0;
+    }
+
+    if( sensor2.isConnected() ){
+      proxValue[1] = sensor2.getProximity();
+    }else{
+      proxValue[1] = 0;
+    }
+
+    // Send data to the GUI //
+    serial_msg.counter = counter++;
+    serial_msg.sensor_data[0] = proxValue[0];  // optical sensor 1
+    serial_msg.sensor_data[1] = proxValue[1];  // optical sensor 2
+    //Serial.write((byte*)&serial_msg, 7);
     
-    HostCom.print(counter);
-    HostCom.print(") ID: ");
-    HostCom.print(optSensor1.getID(), HEX);
-    HostCom.print("; Connected: ");
-    HostCom.print(optSensor1.isConnected());
-    HostCom.print("; Proximity: ");
-    HostCom.print(optSensor1.getProximity());
-    HostCom.println();
+    dat.concat(counter);
+    dat.concat('\t');
+    dat.concat(proxValue[0]);
+    dat.concat('\t');
+    dat.concat(proxValue[1]);
+    dat.concat('\t');
+    Serial.println(dat);
+    Serial.flush();
 
-    HostCom.print(counter);
-    HostCom.print(") ID: ");
-    HostCom.print(optSensor2.getID(), HEX);
-    HostCom.print("; Connected: ");
-    HostCom.print(optSensor2.isConnected());
-    HostCom.print("; Proximity: ");
-    HostCom.print(optSensor2.getProximity());
-    HostCom.println();
-
-    HostCom.println();
-    HostCom.flush();  
-
-    counter++;
-    updating_interval += UPDATING_INTERVAL_MS;
+    ttime += SAMPLE_TIME_MS;
+    
   }
+  
 }
